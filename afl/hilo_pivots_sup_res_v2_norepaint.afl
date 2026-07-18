@@ -1,0 +1,255 @@
+//==================================================================
+// HL PIVOTS V2 - PHIEN BAN KHONG REPAINT (KHONG VE LAI TIN HIEU)
+//------------------------------------------------------------------
+// Khac phuc 3 han che cua ban cu:
+//
+// 1) REPAINT / DO TRE:
+//    - Day/dinh chi duoc CONG NHAN sau khi co du "Confirm Bars"
+//      nen xac nhan ben phai (mac dinh 5 nen thay vi ~20 nen).
+//    - Tin hieu Mua/Ban phat tai NEN XAC NHAN, khong dung du lieu
+//      tuong lai (khong Ref(x, +n) trong logic) => mui ten KHONG
+//      bao gio di chuyen hay bien mat, backtest = giao dich thuc.
+//
+// 2) THEM BO LOC chong "bat dao roi":
+//    - Loc xu huong: chi Mua khi gia tren MA dai han.
+//    - Loc khoi luong: nen tin hieu phai co V >= x lan MA(V,20).
+//    - Xac nhan gia: C phai vuot len tren High cua nen day.
+//
+// 3) SUA LOI DANH MAY ban cu:
+//    - Loi yR4 so sanh nham dtn < SelectedValue(yR4) (dung ra xR4)
+//      va nhan Plot "S4"/"S5" dat nham cho S5/S6.
+//    - Phan S/R viet lai hoan toan bang ValueWhen tren pivot DA
+//      XAC NHAN => khong con dung SelectedValue/dtn, khong con
+//      lookahead Ref(pma, +1), tu dong het ca 2 loi tren.
+//==================================================================
+
+SetChartOptions(0, chartShowDates);
+_N(Title = StrFormat("{{NAME}} - {{INTERVAL}} {{DATE}} Open %g, Hi %g, Lo %g, Close %g (%.1f%%) {{VALUES}}",
+   O, H, L, C, SelectedValue(ROC(C, 1))));
+SetChartBkColor(16);
+GraphXSpace = Param("GraphXSpace", 10, -100, 100, 1);
+SetBarFillColor(IIf(O > C, 24, 19));
+Plot(C, "Price", IIf(O > C, 32, 34), 64);
+
+_SECTION_BEGIN("Name");
+   GfxSetOverlayMode(1);
+   pxh = Status("pxHeight");  pxw = Status("pxWidth");
+   GfxSetTextColor(ColorHSB(42, 42, 42));
+   GfxSetTextAlign(6);  GfxSetBkMode(0);
+   GfxSelectFont("Tahoma", pxh/36);
+   GfxTextOut("Sup/Res V2 (no repaint)", pxw/2, pxh/3);
+_SECTION_END();
+
+//==============================
+_SECTION_BEGIN("HL Pivots V2");
+//==============================
+   psh = ParamToggle("Pivot Shapes", "Off|On", 1);
+   plb = ParamToggle("Pivot Labels", "Off|On", 1);
+   snd = ParamToggle("Sound Alerts", "Off|On", 1);
+   nbz = Param("Swing Bars (ben trai)", 20, 5, 150, 1);
+   cnf = Param("Confirm Bars (ben phai)", 5, 2, 30, 1);
+   tht = Param("Hi Label Adjust", 0.65, 0.10, 5, 0.05) * ATR(5);
+
+   // ----- Bo loc (co the bat/tat tung cai) -----
+   useTrend = ParamToggle("Loc xu huong (chi Mua khi C > MA)", "Off|On", 1);
+   tfp      = Param("Chu ky MA xu huong", 100, 20, 300, 10);
+   useVol   = ParamToggle("Loc khoi luong", "Off|On", 1);
+   vmu      = Param("V >= x lan MA(V,20)", 1.2, 0.5, 5, 0.1);
+   usePrc   = ParamToggle("Xac nhan gia (C vuot High nen day)", "Off|On", 1);
+   useSL    = ParamToggle("Backtest: cat lo tai day gan nhat", "Off|On", 1);
+
+//------------------------------------------------------------------
+// 1) XAC DINH PIVOT KHONG REPAINT
+//    Nen cach day "cnf" nen la DAY neu Low cua no thap nhat trong
+//    cua so gom: nbz nen ben trai + chinh no + cnf nen ben phai.
+//    Toan bo cua so nam trong QUA KHU tai nen hien tai => khong
+//    dung du lieu tuong lai, tin hieu chot ngay khi xuat hien.
+//------------------------------------------------------------------
+   win = nbz + cnf + 1;
+
+   pvL = LLVBars(L, win) == cnf;   // day vua duoc xac nhan tai nen nay
+   pvH = HHVBars(H, win) == cnf;   // dinh vua duoc xac nhan tai nen nay
+
+   // Gia tri cua day/dinh gan nhat (da xac nhan)
+   pvLval = ValueWhen(pvL, Ref(L, -cnf), 1);   // gia day
+   pvLhi  = ValueWhen(pvL, Ref(H, -cnf), 1);   // High cua nen day
+   pvHval = ValueWhen(pvH, Ref(H, -cnf), 1);   // gia dinh
+   pvHlo  = ValueWhen(pvH, Ref(L, -cnf), 1);   // Low cua nen dinh
+
+//------------------------------------------------------------------
+// 2) BO LOC TIN HIEU
+//------------------------------------------------------------------
+   trendOK   = NOT useTrend OR C > MA(C, tfp);
+   volOK     = NOT useVol   OR V >= vmu * MA(V, 20);
+   prcBuyOK  = NOT usePrc   OR C > pvLhi;   // gia da lay lai High nen day
+   prcSellOK = NOT usePrc   OR C < pvHlo;   // gia da thung Low nen dinh
+
+//------------------------------------------------------------------
+// 3) TIN HIEU MUA / BAN
+//    - upZone: tu khi DAY duoc xac nhan den khi DINH duoc xac nhan.
+//    - Mua tai nen DAU TIEN trong upZone thoa het cac bo loc
+//      (khong bat buoc dung nen xac nhan, tranh bo lo tin hieu).
+//    - Ban doi xung trong dnZone; thoat som hon nen khong can loc
+//      khoi luong / xu huong.
+//------------------------------------------------------------------
+   upZone = Flip(pvL, pvH);
+   dnZone = Flip(pvH, pvL);
+
+   buyTrig  = upZone AND trendOK AND volOK AND prcBuyOK;
+   sellTrig = dnZone AND prcSellOK;
+
+   Buy  = ExRem(buyTrig, pvH);    // 1 lan Mua cho moi day
+   Sell = ExRem(sellTrig, pvL);   // 1 lan Ban cho moi dinh
+   Buy  = ExRem(Buy, Sell);       // ep luan phien Mua -> Ban -> Mua
+   Sell = ExRem(Sell, Buy);
+   Short = Sell;  Cover = Buy;
+
+   // Gia khop lenh THUC TE: dong cua cua nen tin hieu
+   // (khong con "mua dung gia day" von chi co khi nhin lai qua khu)
+   SetTradeDelays(0, 0, 0, 0);
+   BuyPrice = SellPrice = ShortPrice = CoverPrice = Close;
+
+   // Cat lo backtest: thung day gan nhat la thoat
+   if(useSL) ApplyStop(stopTypeLoss, stopModePoint, C - pvLval, True);
+
+//------------------------------------------------------------------
+// 4) HIEN THI
+//------------------------------------------------------------------
+   if(psh) {
+    // Mui ten = tin hieu GIAO DICH DUOC, dat tai nen tin hieu,
+    // khong bao gio ve lai
+    PlotShapes(Buy  * shapeUpArrow,   colorBrightGreen, 0, L, -12);
+    PlotShapes(Sell * shapeDownArrow, colorRed,         0, H, -12);
+    // Cham tron nho = vi tri day/dinh goc, CHI DE QUAN SAT.
+    // Ref(pvL, +cnf) o day la tham chieu tuong lai nhung chi dung
+    // de ve dau cham lui ve nen goc SAU KHI pivot da chot - dau
+    // cham xuat hien tre cnf nen va sau do khong bao gio doi cho.
+    PlotShapes(Ref(pvL, cnf) * shapeSmallCircle, colorBrightGreen, 0, L, -5);
+    PlotShapes(Ref(pvH, cnf) * shapeSmallCircle, colorRed,         0, H,  5);
+   }
+
+   if(plb) {
+    for(i = cnf; i < BarCount; i++) {
+     if(pvL[i]) PlotText("\n\n" + NumToStr(L[i - cnf], 1.2), i - cnf - 1, L[i - cnf], colorBrightGreen, 16);
+     if(pvH[i]) PlotText(NumToStr(H[i - cnf], 1.2), i - cnf - 1, H[i - cnf] + tht[i - cnf], colorRed, 16);
+    }
+   }
+
+   if(snd) {
+    AlertIf(Buy,  "SOUND C:\\Windows\\Media\\Windows XP Startup.wav", "Buy pivot confirmed", 1);
+    AlertIf(Sell, "SOUND C:\\Windows\\Media\\Ringin.wav", "Sell pivot confirmed", 2);
+   }
+
+   // Dai mau duoi chart: xanh = dang giu, do = dang dung ngoai
+   Plot(1, "", IIf(Flip(Buy, Sell), colorGreen, colorRed),
+        styleArea | styleOwnScale | styleNoLabel, 0, 15, 0, -3);
+_SECTION_END();
+
+//===========================
+_SECTION_BEGIN("Sup & Res V2");
+//===========================
+// Ho tro / khang cu lay truc tiep tu cac pivot DA XAC NHAN:
+//  - S1..S6 = 6 day gan nhat, R1..R6 = 6 dinh gan nhat.
+//  - Chi dung ValueWhen tren du lieu qua khu => khong lookahead,
+//    khong SelectedValue/dtn => het loi yR4 va loi nhan S5/S6.
+//  - Duong S/R la duong bac thang: tu dong keo dai tu ngay pivot
+//    duoc xac nhan cho den khi co pivot moi.
+   plt = ParamToggle("Sup_Res", "Off|On", 1);
+   sty = ParamStyle("Style", styleLine | styleNoRescale, maskAll);
+   rco = ParamColor("Res Color", colorYellow);
+   sco = ParamColor("Sup Color", colorGreen);
+
+   pivHi = Ref(H, -cnf);   pivLo = Ref(L, -cnf);
+
+   yR1 = ValueWhen(pvH, pivHi, 1);   yS1 = ValueWhen(pvL, pivLo, 1);
+   yR2 = ValueWhen(pvH, pivHi, 2);   yS2 = ValueWhen(pvL, pivLo, 2);
+   yR3 = ValueWhen(pvH, pivHi, 3);   yS3 = ValueWhen(pvL, pivLo, 3);
+   yR4 = ValueWhen(pvH, pivHi, 4);   yS4 = ValueWhen(pvL, pivLo, 4);
+   yR5 = ValueWhen(pvH, pivHi, 5);   yS5 = ValueWhen(pvL, pivLo, 5);
+   yR6 = ValueWhen(pvH, pivHi, 6);   yS6 = ValueWhen(pvL, pivLo, 6);
+
+   if(plt) {
+    Plot(yR1, "R1", rco, sty);
+    Plot(IIf(yR2 != yR1, yR2, Null), "R2", rco, sty);
+    Plot(IIf(yR3 != yR2 AND yR3 != yR1, yR3, Null), "R3", rco, sty);
+    Plot(IIf(yR4 != yR3 AND yR4 != yR2 AND yR4 != yR1, yR4, Null), "R4", rco, sty);
+    Plot(IIf(yR5 != yR4 AND yR5 != yR3 AND yR5 != yR2 AND yR5 != yR1, yR5, Null), "R5", rco, sty);
+    Plot(IIf(yR6 != yR5 AND yR6 != yR4 AND yR6 != yR3 AND yR6 != yR2 AND yR6 != yR1, yR6, Null), "R6", rco, sty);
+
+    Plot(yS1, "S1", sco, sty);
+    Plot(IIf(yS2 != yS1, yS2, Null), "S2", sco, sty);
+    Plot(IIf(yS3 != yS2 AND yS3 != yS1, yS3, Null), "S3", sco, sty);
+    Plot(IIf(yS4 != yS3 AND yS4 != yS2 AND yS4 != yS1, yS4, Null), "S4", sco, sty);
+    Plot(IIf(yS5 != yS4 AND yS5 != yS3 AND yS5 != yS2 AND yS5 != yS1, yS5, Null), "S5", sco, sty);
+    Plot(IIf(yS6 != yS5 AND yS6 != yS4 AND yS6 != yS3 AND yS6 != yS2 AND yS6 != yS1, yS6, Null), "S6", sco, sty);
+   }
+_SECTION_END();
+
+/* =====================
+   EXPLORATION FILTER
+   ===================== */
+minVal = Param("GT giao dich toi thieu (trieu)", 30, 0, 1000, 5) * 1000000;
+Filter = V * C > minVal;
+
+/* =====================
+   BASIC COLUMNS
+   ===================== */
+AddColumn(C, "Gia DC", 1.2);
+AddColumn(C * V, "Tong Tien", 1.0);
+AddColumn(Buy,  "Mua", 1.0, colorWhite, IIf(Buy,  colorBrightGreen, colorDefault));
+AddColumn(Sell, "Ban", 1.0, colorWhite, IIf(Sell, colorRed, colorDefault));
+
+/* =====================
+   SUPPORT COLORS (GREEN)
+   S1 gan nhat -> S6 cu nhat
+   ===================== */
+colS1 = ColorRGB(0, 120, 0);
+colS2 = ColorRGB(0, 150, 0);
+colS3 = ColorRGB(0, 180, 0);
+colS4 = ColorRGB(120, 200, 120);
+colS5 = ColorRGB(170, 220, 170);
+colS6 = ColorRGB(210, 240, 210);
+
+AddColumn(yS1, "Ho Tro 1", 1.2, colorBlack, colS1);
+AddColumn(yS2, "Ho Tro 2", 1.2, colorBlack, colS2);
+AddColumn(yS3, "Ho Tro 3", 1.2, colorBlack, colS3);
+AddColumn(yS4, "Ho Tro 4", 1.2, colorBlack, colS4);
+AddColumn(yS5, "Ho Tro 5", 1.2, colorBlack, colS5);
+AddColumn(yS6, "Ho Tro 6", 1.2, colorBlack, colS6);
+
+/* =====================
+   RESISTANCE COLORS (RED)
+   R1 gan nhat -> R6 cu nhat
+   ===================== */
+colR1 = ColorRGB(180, 0, 0);
+colR2 = ColorRGB(210, 0, 0);
+colR3 = ColorRGB(230, 60, 60);
+colR4 = ColorRGB(240, 120, 120);
+colR5 = ColorRGB(245, 170, 170);
+colR6 = ColorRGB(250, 210, 210);
+
+AddColumn(yR1, "Khang Cu 1", 1.2, colorWhite, colR1);
+AddColumn(yR2, "Khang Cu 2", 1.2, colorWhite, colR2);
+AddColumn(yR3, "Khang Cu 3", 1.2, colorWhite, colR3);
+AddColumn(yR4, "Khang Cu 4", 1.2, colorBlack, colR4);
+AddColumn(yR5, "Khang Cu 5", 1.2, colorBlack, colR5);
+AddColumn(yR6, "Khang Cu 6", 1.2, colorBlack, colR6);
+
+// =====================
+// CAT LEN / CAT XUONG SUPPORT VA RESISTANCE
+// =====================
+BreakUpS1 = Cross(C, yS1);
+BreakUpS2 = Cross(C, yS2);
+BreakUpS3 = Cross(C, yS3);
+
+BreakDnR1 = Cross(yR1, C);
+BreakDnR2 = Cross(yR2, C);
+BreakDnR3 = Cross(yR3, C);
+
+AddColumn(BreakUpS1, "Cat Len S1", 1.0, colorWhite, IIf(BreakUpS1, colS1, colorDefault));
+AddColumn(BreakUpS2, "Cat Len S2", 1.0, colorWhite, IIf(BreakUpS2, colS2, colorDefault));
+AddColumn(BreakUpS3, "Cat Len S3", 1.0, colorWhite, IIf(BreakUpS3, colS3, colorDefault));
+
+AddColumn(BreakDnR1, "Cat Xuong R1", 1.0, colorWhite, IIf(BreakDnR1, colR1, colorDefault));
+AddColumn(BreakDnR2, "Cat Xuong R2", 1.0, colorWhite, IIf(BreakDnR2, colR2, colorDefault));
+AddColumn(BreakDnR3, "Cat Xuong R3", 1.0, colorWhite, IIf(BreakDnR3, colR3, colorDefault));
