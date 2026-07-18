@@ -1,0 +1,221 @@
+//==================================================================
+// 3 MA + BAT DAY PHONG CACH QUY TO CHUC (VC-STYLE) - KHONG REPAINT
+//------------------------------------------------------------------
+// Sua tu ban "3 duong MA" goc. Nhung thay doi chinh:
+//
+// 1) SUA LOI ban goc:
+//    - Comment ghi Optimize() nhung code chi dung Param()
+//      -> da boc Optimize() ben ngoai Param(): tren chart dung gia
+//         tri Param, khi chay Analysis -> Optimize se tu quet dai.
+//    - Buy/Cover bi gan bang TRANG THAI xu huong (MA1>MA2>MA3)
+//      -> bao "Mua" o MOI nen dang uptrend, khong phai tin hieu vao
+//         lenh -> da tach rieng: trang thai xu huong # tin hieu.
+//    - 6 loai cat nhau deu ve mui ten XANH huong LEN (ke ca tin hieu
+//      giam) -> chi ve tin hieu co y nghia, dung mau, dung huong.
+//
+// 2) BAT DAY CHINH XAC HON (khong dung du lieu tuong lai, khong
+//    repaint - tin hieu hien ra la co dinh):
+//    - Day phai duoc XAC NHAN 2 phia: thap nhat trong "Swing Bars"
+//      nen ben trai + "Confirm Bars" nen ben phai.
+//    - Chi bat day kieu MUA NHIP CHINH trong xu huong tang dai han
+//      (buy-the-dip). Downtrend dai han -> khong bat, khong co
+//      ngoai le (tranh bat dao roi).
+//    - Gia phai lay lai duoc High cua nen day (co luc dao chieu).
+//
+// 3) PHONG CACH QUY TO CHUC (tham chieu lens kieu VinaCapital):
+//    - KHUNG LON THANG:  MA dai han phai doc len, cau truc MA trung
+//      han con nam tren MA dai han.
+//    - ZONE-BASED:       day phai nam trong VUNG GIA TRI (quanh MA
+//      trung/dai han +- ATR); cat lo cung theo VUNG (day - 0.5 ATR),
+//      khong theo 1 duong ke chinh xac.
+//    - VOLUME-WEIGHTED:  khoi luong CAN KIET khi chinh (dry-up) va
+//      BUNG NO tro lai tai nen tin hieu (dong tien lon quay lai).
+//    - DO SAU NHIP CHINH: 7%-25% tu dinh 60 phien - du sau de co
+//      gia tot, chua sau den muc gay cau truc.
+//    - THANH KHOAN:      mac dinh > 50 ty/phien (quy can vao/ra
+//      duoc vi the lon).
+//    - LUU Y QUAN TRONG: AFL khong doc duoc BCTC. Tieu chi cot loi
+//      cua quy (chat luong doanh nghiep: ROE, CFO, no vay, quan
+//      tri...) PHAI loc truoc bang tay. Hay dua cac ma da qua tam
+//      soat co ban vao mot Watchlist va bat toggle "Chi quet
+//      Watchlist" ben duoi - code nay chi lo phan TIMING.
+//==================================================================
+
+_SECTION_BEGIN("Price");
+SetChartOptions(0, chartShowArrows | chartShowDates);
+_N(Title = StrFormat("{{NAME}} - {{INTERVAL}} {{DATE}} Open %g, Hi %g, Lo %g, Close %g (%.1f%%) {{VALUES}}",
+   O, H, L, C, SelectedValue(ROC(C, 1))));
+Plot(Close, "Close", ParamColor("Color", colorDefault), styleNoTitle | ParamStyle("Style") | GetPriceStyle());
+_SECTION_END();
+
+//==============================
+_SECTION_BEGIN("3 duong MA");
+//==============================
+// Optimize() boc Param(): chart dung gia tri Param, Optimizer quet dai
+PeriodMA1 = Optimize("PeriodMA1", Param("PeriodMA1 (ngan)",  50, 10, 100,  5), 10, 100,  5);
+PeriodMA2 = Optimize("PeriodMA2", Param("PeriodMA2 (trung)", 100, 20, 200, 10), 20, 200, 10);
+PeriodMA3 = Optimize("PeriodMA3", Param("PeriodMA3 (dai)",   200, 50, 300, 10), 50, 300, 10);
+
+Enable_MA1 = ParamToggle("Bat MA1", "Tat|Bat", 1);
+Enable_MA2 = ParamToggle("Bat MA2", "Tat|Bat", 1);
+Enable_MA3 = ParamToggle("Bat MA3", "Tat|Bat", 1);
+
+MA1 = MA(Close, PeriodMA1);
+MA2 = MA(Close, PeriodMA2);
+MA3 = MA(Close, PeriodMA3);
+
+Plot(IIf(Enable_MA1, MA1, Null), "MA" + NumToStr(PeriodMA1, 1.0), colorOrange,      styleLine | styleDashed);
+Plot(IIf(Enable_MA2, MA2, Null), "MA" + NumToStr(PeriodMA2, 1.0), colorBrightGreen, styleLine | styleDots);
+Plot(IIf(Enable_MA3, MA3, Null), "MA" + NumToStr(PeriodMA3, 1.0), colorLightBlue,   styleLine | styleThick);
+
+// Trang thai xu huong (de doc chart / exploration - KHONG phai lenh)
+xuhuongtang = MA1 > MA2 AND MA2 > MA3;
+xuhuonggiam = MA1 < MA2 AND MA2 < MA3;
+sideways    = NOT (xuhuongtang OR xuhuonggiam);
+
+// Cac su kien cat nhau (tham khao)
+Gia_MA1 = Cross(Close, MA1);   Gia_MA1x = Cross(MA1, Close);
+Gia_MA2 = Cross(Close, MA2);   Gia_MA2x = Cross(MA2, Close);
+Gia_MA3 = Cross(Close, MA3);   Gia_MA3x = Cross(MA3, Close);
+GoldenX = Cross(MA1, MA2);     // cat vang: MA ngan vuot MA trung
+DeathX  = Cross(MA2, MA1);     // cat chet
+_SECTION_END();
+
+//=========================================
+_SECTION_BEGIN("Bat day VC-Style");
+//=========================================
+   swb = Param("Swing Bars (ben trai)",   10, 5, 50, 1);
+   cnf = Param("Confirm Bars (ben phai)",  4, 2, 20, 1);
+
+   // Bat/tat tung bo loc de noi long khi thi truong it tin hieu
+   useZone  = ParamToggle("Loc vung gia tri (MA2-MA3 +- ATR)", "Off|On", 1);
+   useDepth = ParamToggle("Loc do sau nhip chinh 7-25%",        "Off|On", 1);
+   useDry   = ParamToggle("Loc KL can kiet quanh day",          "Off|On", 1);
+   vSurgeK  = Param("KL nen tin hieu >= x lan MA(V,20)", 1.3, 1.0, 3, 0.1);
+   useWL    = ParamToggle("Chi quet Watchlist 0 (ma da tam soat)", "Off|On", 0);
+
+//------------------------------------------------------------------
+// 1) DAY / DINH XAC NHAN 2 PHIA - khong repaint
+//------------------------------------------------------------------
+   win = swb + cnf + 1;
+   pvL = LLVBars(L, win) == cnf;            // day vua duoc xac nhan
+   pvH = HHVBars(H, win) == cnf;            // dinh vua duoc xac nhan
+
+   pivLo   = ValueWhen(pvL, Ref(L, -cnf), 1);   // gia day gan nhat
+   pivLoHi = ValueWhen(pvL, Ref(H, -cnf), 1);   // High cua nen day
+   pivHiLo = ValueWhen(pvH, Ref(L, -cnf), 1);   // Low cua nen dinh
+
+//------------------------------------------------------------------
+// 2) KHUNG LON THANG - chi mua khi xu huong dai han con tot
+//------------------------------------------------------------------
+   trendGate = MA3 > Ref(MA3, -20)          // MA dai han doc len
+               AND MA2 > MA3;               // cau truc trung > dai con giu
+
+//------------------------------------------------------------------
+// 3) VUNG GIA TRI (zone-based) + DO SAU NHIP CHINH
+//------------------------------------------------------------------
+   atr = ATR(14);
+   inZone  = pivLo <= MA2 + atr AND pivLo >= MA3 - 2 * atr;
+   depth   = 100 * (HHV(H, 60) - pivLo) / HHV(H, 60);
+   depthOK = depth >= 7 AND depth <= 25;
+
+//------------------------------------------------------------------
+// 4) CHU KY KHOI LUONG: can kiet khi chinh -> bung no khi bat
+//------------------------------------------------------------------
+   vma    = MA(V, 20);
+   dryUp  = ValueWhen(pvL, MA(V, 5), 1) < ValueWhen(pvL, vma, 1);
+   vSurge = V >= vSurgeK * vma;
+
+//------------------------------------------------------------------
+// 5) TIN HIEU BAT DAY
+//    Nen DAU TIEN sau khi day xac nhan thoa het dieu kien:
+//------------------------------------------------------------------
+   wlOK    = NOT useWL OR InWatchList(0);
+   zoneOK  = NOT useZone  OR inZone;
+   dOK     = NOT useDepth OR depthOK;
+   dryOK   = NOT useDry   OR dryUp;
+   reclaim = C > pivLoHi;                   // luc dao chieu that su
+
+   upZone = Flip(pvL, pvH);
+   buyRaw = upZone AND trendGate AND zoneOK AND dOK AND dryOK
+            AND vSurge AND reclaim AND wlOK;
+
+   Buy = ExRem(buyRaw, pvH);                // 1 lan mua cho moi day
+
+//------------------------------------------------------------------
+// 6) THOAT LENH - zone-based nhu quy:
+//    - Cat lo: thung VUNG day (day - 0.5 ATR) -> ApplyStop.
+//    - Thoat cau truc: dinh xac nhan + thung Low nen dinh,
+//      HOAC dong cua thung MA dai han kem khoi luong lon.
+//------------------------------------------------------------------
+   exitTop   = pvH AND C < pivHiLo;
+   exitTrend = Cross(MA3, C) AND V > vma;
+   Sell = exitTop OR exitTrend;
+
+   Buy  = ExRem(Buy, Sell);
+   Sell = ExRem(Sell, Buy);
+   Short = Cover = 0;                       // VN chua ban khong
+
+   SetTradeDelays(0, 0, 0, 0);
+   BuyPrice = SellPrice = Close;
+   ApplyStop(stopTypeLoss, stopModePoint, C - (pivLo - 0.5 * atr), True);
+
+//------------------------------------------------------------------
+// 7) HIEN THI
+//------------------------------------------------------------------
+   // Mui ten lon = tin hieu giao dich (khong bao gio ve lai)
+   PlotShapes(Buy  * shapeUpArrow,   colorBrightGreen, 0, L, -15);
+   PlotShapes(Sell * shapeDownArrow, colorRed,         0, H, -15);
+   // Cham tron nho = vi tri day/dinh goc (chi de quan sat; hien ra
+   // sau khi da xac nhan "cnf" nen va sau do khong doi cho)
+   PlotShapes(Ref(pvL, cnf) * shapeSmallCircle, colorBrightGreen, 0, L, -6);
+   PlotShapes(Ref(pvH, cnf) * shapeSmallCircle, colorRed,         0, H,  6);
+   // Tam giac nho = golden cross / death cross (tham khao)
+   PlotShapes(GoldenX * shapeSmallUpTriangle,   colorAqua,   0, L, -25);
+   PlotShapes(DeathX  * shapeSmallDownTriangle, colorOrange, 0, H,  25);
+   // Duong cat lo vung day
+   Plot(pivLo - 0.5 * atr, "Vung cat lo", colorOrange, styleDashed | styleNoRescale);
+_SECTION_END();
+
+//==============================
+_SECTION_BEGIN("Khoi Luong Trung Binh");
+//==============================
+messageboard = ParamToggle("Tat/mo Khoi luong TB", "Hien|An", 1);
+if (messageboard == 1)
+{
+    HPercent = Param("Chieu cao VOL", 20, 1, 100, 1);
+    MAV  = MA(V, Param("DUONG MAv", 20, 1, 100, 1));
+    Vmax = HighestVisibleValue(V) * 100 / HPercent;
+    Vmin = LowestVisibleValue(V);
+    Plot(V, "Volume", IIf(Close > Open, ParamColor("Up Color", colorGreen), ParamColor("Down Color", colorRed)),
+         styleHistogram | styleOwnScale, Vmin, Vmax, 0, 0, 2);
+    Plot(MAV, "MAV", colorWhite, styleLine | styleOwnScale, Vmin, Vmax, 0, 0, 2);
+}
+_SECTION_END();
+
+//==============================
+// EXPLORATION - quet cuoi phien
+//==============================
+minVal = Param("GT giao dich toi thieu (trieu don vi)", 50, 0, 1000, 5) * 1000000;
+Filter = V * C > minVal AND (NOT useWL OR InWatchList(0));
+
+AddColumn(C,     "Gia DC", 1.2);
+AddColumn(C * V, "Tong Tien", 1.0);
+
+AddColumn(Buy,  "BAT DAY", 1.0, colorWhite, IIf(Buy,  colorBrightGreen, colorDefault));
+AddColumn(Sell, "THOAT",   1.0, colorWhite, IIf(Sell, colorRed, colorDefault));
+
+AddColumn(xuhuongtang, "Xu huong tang", 1.0, colorBlack, IIf(xuhuongtang, ColorRGB(120, 200, 120), colorDefault));
+AddColumn(xuhuonggiam, "Xu huong giam", 1.0, colorBlack, IIf(xuhuonggiam, ColorRGB(240, 120, 120), colorDefault));
+AddColumn(sideways,    "Sideways",      1.0);
+
+AddColumn(trendGate,          "Khung lon OK",   1.0, colorBlack, IIf(trendGate, ColorRGB(120, 200, 120), colorDefault));
+AddColumn(upZone AND inZone,  "Day trong zone", 1.0);
+AddColumn(depth,              "% chinh tu dinh", 1.1);
+AddColumn(V / vma,            "KL / KLTB20",     1.2);
+
+AddColumn(Gia_MA1, "Cat len MA1", 1.0);
+AddColumn(Gia_MA2, "Cat len MA2", 1.0);
+AddColumn(Gia_MA3, "Cat len MA3", 1.0);
+AddColumn(GoldenX, "Golden cross", 1.0, colorWhite, IIf(GoldenX, colorGreen, colorDefault));
+AddColumn(DeathX,  "Death cross",  1.0, colorWhite, IIf(DeathX,  colorRed,   colorDefault));
