@@ -1,0 +1,184 @@
+// =====================================================================
+//  RSI 14 CO BAN + PHAN KY RSI 14 / RSI 50 + PANEL + EXPLORE
+//  ---------------------------------------------------------------
+//  CACH DUNG EXPLORE (quet tin hieu phan ky):
+//    1. Mo Analysis -> chon file nay -> bam "Explore"
+//    2. Chon khung thoi gian tai: Analysis -> Settings -> General
+//       -> Periodicity:  1 Hour / 4 Hour / Daily / Weekly / Monthly
+//       (Khung 4H: neu chua co trong danh sach, bat "Custom time
+//        intervals" trong Tools -> Preferences -> Intraday.
+//        Khung 1H/4H can du lieu intraday.)
+//    3. Range: chon "1 recent bar(s)" de quet tin hieu o nen moi nhat,
+//       hoac "All quotes" de xem toan bo lich su tin hieu.
+//  Luu y: Zig/Peak/Trough nhin ve tuong lai vai nen, tin hieu chi
+//  chac chan sau khi dinh/day da duoc xac nhan.
+// =====================================================================
+
+// ---------------------------------------------------------------
+// Ham do phan ky: chi luu dinh/day gan nhat bang bien don
+// (khong dung mang tich luy x[]/price[] nen khong the vuot
+//  chi so mang -> het loi "Error 10. Array subscript out of range")
+// ---------------------------------------------------------------
+function PhanKyDinh(rsiArr, zigPct)   // phan ky am: RSI dinh sau thap hon, gia dinh sau cao hon -> BAN
+{
+    kq = 0;
+    zz = Zig(rsiArr, zigPct);
+    pk = Peak(rsiArr, zigPct, 1);
+    prevRsi = Null;
+    prevGia = Null;
+    for (i = 0; i < BarCount; i++)
+    {
+        if (NOT IsNull(pk[i]) AND zz[i] == pk[i])
+        {
+            if (NOT IsNull(prevRsi) AND zz[i] < prevRsi AND C[i] > prevGia)
+                kq[i] = 1;
+            prevRsi = zz[i];
+            prevGia = C[i];
+        }
+    }
+    return kq;
+}
+
+function PhanKyDay(rsiArr, zigPct)    // phan ky duong: RSI day sau cao hon, gia day sau thap hon -> MUA
+{
+    kq = 0;
+    zz = Zig(rsiArr, zigPct);
+    tr = Trough(rsiArr, zigPct, 1);
+    prevRsi = Null;
+    prevGia = Null;
+    for (i = 0; i < BarCount; i++)
+    {
+        if (NOT IsNull(tr[i]) AND zz[i] == tr[i])
+        {
+            if (NOT IsNull(prevRsi) AND zz[i] > prevRsi AND C[i] < prevGia)
+                kq[i] = 1;
+            prevRsi = zz[i];
+            prevGia = C[i];
+        }
+    }
+    return kq;
+}
+
+// ==== RSI 14 CO BAN ====
+_SECTION_BEGIN("RSI 14 co ban");
+hienRSI = ParamToggle("Tat/mo duong RSI", "Hien|An", 1);
+n1 = Optimize("Loai RSI 1", 14, 9, 100, 1);
+
+// THAM SO DIEU CHINH CAC MUC RSI
+rsiOverbought = Optimize("RSI QUA MUA", 70, 50, 90, 5);
+rsiOversold   = Optimize("RSI QUA BAN", 30, 10, 50, 5);
+rsiCenter     = Optimize("RSI CAN BANG", 50, 10, 90, 5);
+// CHON MAU CHO TUNG DUONG
+colorOB = ParamColor("RSI QUA MUA", colorRed);
+colorOS = ParamColor("RSI QUA BAN", colorGreen);
+colorCT = ParamColor("RSI CAN BANG", colorBlue);
+
+if (hienRSI)
+{
+    // VE CAC DUONG THAM CHIEU RSI
+    Plot(rsiOverbought, "RSI QUA MUA",  colorOB, styleLine);
+    Plot(rsiOversold,   "RSI QUA BAN",  colorOS, styleLine);
+    Plot(rsiCenter,     "RSI CAN BANG", colorCT, styleDashed | styleNoTitle);
+
+    Plot(RSI(n1), "RSI",
+        IIf(RSI(n1) <= 30, colorCustom9,
+        IIf(RSI(n1) <= 55, colorWhite,
+        IIf(RSI(n1) <= 70, colorViolet, colorRed))), styleThick);
+}
+_SECTION_END();
+
+// ==== RSI 14 PHAN KY ====
+_SECTION_BEGIN("Phan ky RSI 14");
+hienPK14 = ParamToggle("Tat/mo duong RSI 14", "Hien|An", 1);
+GraphXSpace = 7;
+nZig14  = Param("Loai Duong RSI", 14, 1, 100, 1);   // do nhay Zig (%)
+chuKy14 = Param("Chu ky RSI 14", 14, 2, 100, 1);
+
+rsi14 = RSI(chuKy14);
+Var14 = Zig(rsi14, nZig14);
+
+// Tin hieu luon duoc tinh (de Explore chay duoc ke ca khi tat hien thi)
+Sellpkrsi = PhanKyDinh(rsi14, nZig14);
+Buypkrsi  = PhanKyDay(rsi14, nZig14);
+
+if (hienPK14)
+{
+    PlotShapes(IIf(Sellpkrsi, shapeDownArrow, shapeNone), colorRed,      0, Var14, 0);
+    PlotShapes(IIf(Buypkrsi,  shapeUpArrow,   shapeNone), colorCustom12, 0, Var14, 15);
+}
+_SECTION_END();
+
+// ==== RSI 50 PHAN KY ====
+_SECTION_BEGIN("Phan ky RSI 50");
+hienPK50 = ParamToggle("Tat/mo duong RSI 50", "Hien|An", 1);
+nZig50 = Optimize("ZIG", 9, 5, 50, 1);
+per50  = Optimize("RSI 50", 50, 5, 50, 1);
+
+rsi50 = RSI(per50);
+Var50 = Zig(rsi50, nZig50);
+
+Sellpkrsi50 = PhanKyDinh(rsi50, nZig50);
+Buypkrsi50  = PhanKyDay(rsi50, nZig50);
+
+if (hienPK50)
+{
+    PlotShapes(IIf(Sellpkrsi50, shapeDownArrow, shapeNone), colorRed,    0, Var50, -15);
+    PlotShapes(IIf(Buypkrsi50,  shapeUpArrow,   shapeNone), colorYellow, 0, Var50, -10);
+}
+_SECTION_END();
+
+//============================= RSI PANEL =======================================================
+_SECTION_BEGIN("RSI % Change Panel");
+rsiPeriod = 14;
+rsiToday = RSI(rsiPeriod);
+rsiPrev  = Ref(RSI(rsiPeriod), -1);
+rsiChangePts = rsiToday - rsiPrev;
+rsiChangePct = IIf(rsiPrev != 0, rsiChangePts / rsiPrev * 100, 0);
+
+// Tinh % thay doi gia
+giaHomQua = Ref(Close, -1);
+giaHomNay = Close;
+giaPct = IIf(giaHomQua != 0, 100 * (giaHomNay - giaHomQua) / giaHomQua, 0);
+
+// ==== LAY THEO CON CHUOT ====
+rsiTodaySel = SelectedValue(rsiToday);
+rsiPrevSel  = SelectedValue(rsiPrev);
+rsiPtsSel   = SelectedValue(rsiChangePts);
+rsiPctSel   = SelectedValue(rsiChangePct);
+giaPctSel   = SelectedValue(giaPct);
+
+// ==== TO MAU NEN THEO HUONG THAY DOI ====
+bgColor = IIf(rsiPtsSel >= 0, colorDarkGreen, colorDarkRed);
+
+// Gfx chi chay khi ve chart, khong chay trong Explore/Backtest
+if (Status("action") == actionIndicator)
+{
+    GfxSetBkMode(1);
+    GfxSelectFont("Tahoma", 9, 700);
+    GfxSetTextColor(colorWhite);
+    GfxSetBkColor(bgColor);
+    px = Max(10, Status("pxwidth") - 2700);
+    py = 10;
+    lineH = 16;
+    GfxTextOut("RSI HOM QUA: "    + NumToStr(rsiPrevSel, 1.2),  px, py);
+    GfxTextOut("RSI " + NumToStr(rsiPeriod, 1.0) + ": " + NumToStr(rsiTodaySel, 1.2), px, py + lineH);
+    GfxTextOut("THAY DOI DIEM: "  + NumToStr(rsiPtsSel, 1.2),   px, py + 2 * lineH);
+    GfxTextOut("% THAY DOI RSI: " + NumToStr(rsiPctSel, 1.2) + "%", px, py + 3 * lineH);
+    GfxTextOut("% THAY DOI GIA: " + NumToStr(giaPctSel, 1.2) + "%", px, py + 4 * lineH);
+}
+_SECTION_END();
+
+//============================= EXPLORE =======================================================
+_SECTION_BEGIN("Explore phan ky RSI");
+Filter = Buypkrsi OR Sellpkrsi OR Buypkrsi50 OR Sellpkrsi50;
+
+AddTextColumn(Interval(2), "Khung thoi gian");
+AddColumn(C, "Gia dong cua", 1.2);
+AddColumn(giaPct, "% Thay doi gia", 1.2);
+AddColumn(rsi14, "RSI 14", 1.2);
+AddColumn(rsiChangePts, "RSI thay doi (diem)", 1.2);
+AddTextColumn(WriteIf(Buypkrsi,  "MUA (phan ky day)",
+              WriteIf(Sellpkrsi, "BAN (phan ky dinh)", "-")), "Phan ky RSI 14");
+AddTextColumn(WriteIf(Buypkrsi50,  "MUA (phan ky day)",
+              WriteIf(Sellpkrsi50, "BAN (phan ky dinh)", "-")), "Phan ky RSI 50");
+_SECTION_END();
