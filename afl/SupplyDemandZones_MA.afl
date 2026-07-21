@@ -1,0 +1,190 @@
+// =====================================================================
+//  SUPPLY / DEMAND ZONES  +  NEN NHAT  +  MA(20, 60, 100)
+//  ---------------------------------------------------------------
+//  Dinh nghia zone:
+//   * SUPPLY ZONE:
+//       - Day zone  = gia MO CUA cua cay nen TANG cuoi cung
+//                     truoc khi gia GIAM manh.
+//       - Dinh zone = vi tri CAO NHAT cua cum nen tao ra zone.
+//   * DEMAND ZONE:
+//       - Dinh zone = gia MO CUA cua cay nen GIAM cuoi cung
+//                     truoc khi gia TANG manh.
+//       - Day zone  = vi tri THAP NHAT cua cum nen tao ra zone.
+//   * Khoang cach toi thieu giua 2 zone cung loai: 20 cay nen
+//     (chinh duoc bang Param).
+//   * Bieu do gia ve bang nen Nhat (candlestick).
+//   * Ve them MA20, MA60, MA100 va danh dau giao diem cat len /
+//     cat xuong giua cac duong MA:
+//       - Hinh tron  : MA20 cat MA60
+//       - Tam giac   : MA20 cat MA100
+//       - Ngoi sao   : MA60 cat MA100
+//       - Mau XANH = cat len, mau DO = cat xuong
+// =====================================================================
+
+_SECTION_BEGIN("Supply-Demand Zones + MA 20-60-100");
+
+SetChartOptions(0, chartShowArrows | chartShowDates);
+GraphXSpace = 5;
+
+// ------------------------------ THAM SO ------------------------------
+zoneSpacing   = Param("Khoang cach giua cac zone (nen)",  20,   5, 200, 1);
+clusterBars   = Param("So nen cua cum tao zone",           5,   2,  20, 1);
+moveBars      = Param("So nen xac nhan song manh",         3,   1,  10, 1);
+strongMoveATR = Param("Bien do song manh (x ATR14)",     1.5, 0.5,   5, 0.1);
+zoneExtend    = Param("Do dai toi da cua zone (nen)",     60,  10, 500, 5);
+showZones     = ParamToggle("Hien Supply/Demand zone", "Tat|Bat", 1);
+showMA        = ParamToggle("Hien MA 20-60-100",       "Tat|Bat", 1);
+
+atr = ATR(14);
+
+// ----------------------- NHAN DIEN DIEM TAO ZONE ---------------------
+upCandle   = C > O;      // nen tang
+downCandle = C < O;      // nen giam
+
+// GIAM manh: trong "moveBars" nen ke tiep gia roi >= strongMoveATR x ATR
+futureLow   = Ref(LLV(L, moveBars), moveBars);
+strongDrop  = (C - futureLow) >= strongMoveATR * atr;
+
+// TANG manh: trong "moveBars" nen ke tiep gia tang >= strongMoveATR x ATR
+futureHigh  = Ref(HHV(H, moveBars), moveBars);
+strongRally = (futureHigh - C) >= strongMoveATR * atr;
+
+// SUPPLY pivot: cay nen TANG cuoi cung truoc khi gia giam manh
+supplyPivot = Nz(upCandle AND strongDrop AND Ref(C, 1) < C);
+
+// DEMAND pivot: cay nen GIAM cuoi cung truoc khi gia tang manh
+demandPivot = Nz(downCandle AND strongRally AND Ref(C, 1) > C);
+
+// Bien cua cum nen tao zone (tinh ca cay nen dao chieu ngay sau pivot)
+clusterHigh = Max(HHV(H, clusterBars), Ref(H, 1));
+clusterLow  = Min(LLV(L, clusterBars), Ref(L, 1));
+
+// --------------------- DUNG ZONE BANG VONG LAP -----------------------
+supTop = Null;  supBot = Null;      // bien supply zone theo tung bar
+demTop = Null;  demBot = Null;      // bien demand zone theo tung bar
+supStart = Null; demStart = Null;   // danh dau bar tao zone
+
+lastSupply = -1e9;
+lastDemand = -1e9;
+
+for (i = clusterBars; i < BarCount - moveBars; i++)
+{
+    // ------------------------- SUPPLY ZONE ---------------------------
+    if (supplyPivot[i] AND (i - lastSupply) >= zoneSpacing)
+    {
+        zTop = clusterHigh[i];      // vi tri cao nhat cua cum nen
+        zBot = O[i];                // gia mo cua cua nen tang cuoi cung
+        if (zTop > zBot)
+        {
+            j = i;
+            while (j < BarCount AND j < i + zoneExtend)
+            {
+                if (j > i AND C[j] > zTop) break;   // zone bi pha vo
+                supTop[j] = zTop;
+                supBot[j] = zBot;
+                j++;
+            }
+            supStart[i] = 1;
+            lastSupply = i;
+        }
+    }
+
+    // ------------------------- DEMAND ZONE ---------------------------
+    if (demandPivot[i] AND (i - lastDemand) >= zoneSpacing)
+    {
+        zTop = O[i];                // gia mo cua cua nen giam cuoi cung
+        zBot = clusterLow[i];       // vi tri thap nhat cua cum nen
+        if (zTop > zBot)
+        {
+            j = i;
+            while (j < BarCount AND j < i + zoneExtend)
+            {
+                if (j > i AND C[j] < zBot) break;   // zone bi pha vo
+                demTop[j] = zTop;
+                demBot[j] = zBot;
+                j++;
+            }
+            demStart[i] = 1;
+            lastDemand = i;
+        }
+    }
+}
+
+// ---------------------------- VE BIEU DO -----------------------------
+// Nen Nhat: xanh = tang, do = giam
+candleColor = IIf(C > O, colorGreen, IIf(C < O, colorRed, colorGrey40));
+SetBarFillColor(candleColor);
+Plot(C, "Gia", candleColor, styleCandle);
+
+if (showZones)
+{
+    // SUPPLY ZONE: vung mau do
+    PlotOHLC(supTop, supTop, supBot, supBot, "Supply Zone",
+             ColorRGB(255, 210, 210), styleCloud | styleNoLabel | styleNoRescale,
+             Null, Null, 0, -1, 0);
+    Plot(supTop, "Dinh Supply (cao nhat cum nen)",
+         colorRed, styleLine | styleThick | styleNoLabel | styleNoRescale);
+    Plot(supBot, "Day Supply (mo cua nen tang cuoi)",
+         colorRed, styleDashed | styleNoLabel | styleNoRescale);
+
+    // DEMAND ZONE: vung mau xanh
+    PlotOHLC(demTop, demTop, demBot, demBot, "Demand Zone",
+             ColorRGB(205, 240, 215), styleCloud | styleNoLabel | styleNoRescale,
+             Null, Null, 0, -1, 0);
+    Plot(demBot, "Day Demand (thap nhat cum nen)",
+         colorGreen, styleLine | styleThick | styleNoLabel | styleNoRescale);
+    Plot(demTop, "Dinh Demand (mo cua nen giam cuoi)",
+         colorGreen, styleDashed | styleNoLabel | styleNoRescale);
+
+    // Danh dau cay nen tao zone
+    PlotShapes(IIf(Nz(supStart), shapeDownArrow, shapeNone), colorRed,   0, H, -25);
+    PlotShapes(IIf(Nz(demStart), shapeUpArrow,   shapeNone), colorGreen, 0, L, -25);
+}
+
+// ------------------------- MA 20 / 60 / 100 --------------------------
+ma20  = MA(C, 20);
+ma60  = MA(C, 60);
+ma100 = MA(C, 100);
+
+if (showMA)
+{
+    Plot(ma20,  "MA20",  colorBlue,   styleLine);
+    Plot(ma60,  "MA60",  colorOrange, styleLine);
+    Plot(ma100, "MA100", colorViolet, styleLine | styleThick);
+
+    // Giao diem cat len / cat xuong giua cac duong MA
+    up_20_60  = Cross(ma20, ma60);      dn_20_60  = Cross(ma60, ma20);
+    up_20_100 = Cross(ma20, ma100);     dn_20_100 = Cross(ma100, ma20);
+    up_60_100 = Cross(ma60, ma100);     dn_60_100 = Cross(ma100, ma60);
+
+    // MA20 x MA60: hinh tron
+    PlotShapes(IIf(up_20_60, shapeCircle, shapeNone), colorBrightGreen, 0, ma60, 0);
+    PlotShapes(IIf(dn_20_60, shapeCircle, shapeNone), colorRed,         0, ma60, 0);
+
+    // MA20 x MA100: tam giac
+    PlotShapes(IIf(up_20_100, shapeUpTriangle,   shapeNone), colorBrightGreen, 0, ma100, -18);
+    PlotShapes(IIf(dn_20_100, shapeDownTriangle, shapeNone), colorRed,         0, ma100,  18);
+
+    // MA60 x MA100: ngoi sao
+    PlotShapes(IIf(up_60_100, shapeStar, shapeNone), colorBrightGreen, 0, ma100, -32);
+    PlotShapes(IIf(dn_60_100, shapeStar, shapeNone), colorRed,         0, ma100,  32);
+}
+
+// ------------------------------ TIEU DE ------------------------------
+Title = StrFormat("{{NAME}} - {{INTERVAL}} {{DATE}}  Mo %g  Cao %g  Thap %g  Dong %g (%.2f%%)",
+                  O, H, L, C, SelectedValue(ROC(C, 1))) + "\n" +
+        EncodeColor(colorBlue)   + "MA20 = "  + WriteVal(ma20,  1.2) + "  " +
+        EncodeColor(colorOrange) + "MA60 = "  + WriteVal(ma60,  1.2) + "  " +
+        EncodeColor(colorViolet) + "MA100 = " + WriteVal(ma100, 1.2) + "\n" +
+        EncodeColor(colorRed)   + "Supply zone: " +
+        WriteIf(Nz(SelectedValue(supBot)),
+                WriteVal(SelectedValue(supBot), 1.2) + " - " + WriteVal(SelectedValue(supTop), 1.2),
+                "khong co") + "   " +
+        EncodeColor(colorGreen) + "Demand zone: " +
+        WriteIf(Nz(SelectedValue(demBot)),
+                WriteVal(SelectedValue(demBot), 1.2) + " - " + WriteVal(SelectedValue(demTop), 1.2),
+                "khong co") + "\n" +
+        EncodeColor(colorDefault) +
+        "Tron: MA20 x MA60 | Tam giac: MA20 x MA100 | Ngoi sao: MA60 x MA100 | Xanh = cat len, Do = cat xuong";
+
+_SECTION_END();
