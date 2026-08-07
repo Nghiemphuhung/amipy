@@ -141,10 +141,15 @@ function FA( fieldname, packedfld )
 function TTM4( q )
 {
     local chg, s;
-    chg    = q != Ref( q, -1 );
-    chg[0] = True;
+
+    /* Diem doi gia tri = ky BCTC moi. Bar dau tien luon tinh la 1 diem doi
+       (khong dung phep gan phan tu chg[0] vi AFL khong cho gan vao phan tu
+        cua bien local trong ham). */
+    chg = ( q != Ref( q, -1 ) ) OR ( BarIndex() == 0 );
+
     s = ValueWhen( chg, q, 1 ) + ValueWhen( chg, q, 2 ) +
         ValueWhen( chg, q, 3 ) + ValueWhen( chg, q, 4 );
+
     return s;
 }
 
