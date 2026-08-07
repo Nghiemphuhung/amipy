@@ -97,10 +97,17 @@ _SECTION_END();
    1. HAM TIEN ICH
    ========================================================================== */
 
-/* Chia an toan: mau <= 0 hoac Null -> tra Null (de cot hien thi trong) */
+/* Chia an toan: mau = 0 hoac Null -> tra Null (de cot hien thi trong).
+   Mau duoc thay bang 1 truoc khi chia nen khong bao gio chia cho 0
+   (IIf tinh CA HAI nhanh, neu de nguyen "num / den" se co Warning 505). */
 function SafeDiv( num, den )
 {
-    return IIf( IsNull(den) OR den == 0 OR IsNull(num), Null, num / den );
+    local bad, d;
+
+    bad = IsNull( den ) OR den == 0 OR IsNull( num );
+    d   = IIf( bad, 1, den );
+
+    return IIf( bad, Null, num / d );
 }
 
 /* Doc 1 truong co ban tu composite rieng: ~FA_<FIELD>_<TICKER> */
@@ -109,48 +116,6 @@ function FAField( fieldname )
     local sym;
     sym = FA_PREFIX + fieldname + "_" + Name();
     return Foreign( sym, "C", True );   // True = pad gia tri phien truoc
-}
-
-/* Doc truong tu composite gop: ~FA_<TICKER>, moi truong nam o 1 cot OHLCV */
-function FAPacked( fld )
-{
-    local sym;
-    sym = FA_PREFIX + Name();
-    return Foreign( sym, fld, True );
-}
-
-/* Bo chon nguon theo FA_MODE. packedfld = ky tu cot khi dung che do gop. */
-function FA( fieldname, packedfld )
-{
-    local res;
-
-    if( FA_MODE == 0 )
-    {
-        res = FAField( fieldname );
-    }
-    else
-    {
-        res = FAPacked( packedfld );
-    }
-
-    return res;
-}
-
-/* Cong don 4 quy gan nhat (TTM) tu mang du lieu quy dang bac thang.
-   Dung khi nguon chi cung cap so lieu TUNG QUY chu khong phai TTM san. */
-function TTM4( q )
-{
-    local chg, s;
-
-    /* Diem doi gia tri = ky BCTC moi. Bar dau tien luon tinh la 1 diem doi
-       (khong dung phep gan phan tu chg[0] vi AFL khong cho gan vao phan tu
-        cua bien local trong ham). */
-    chg = ( q != Ref( q, -1 ) ) OR ( BarIndex() == 0 );
-
-    s = ValueWhen( chg, q, 1 ) + ValueWhen( chg, q, 2 ) +
-        ValueWhen( chg, q, 3 ) + ValueWhen( chg, q, 4 );
-
-    return s;
 }
 
 /* Gia tri mua rong cua khoi ngoai theo tung phien (dong). */
@@ -182,24 +147,69 @@ function ForeignNetValue()
    2. LAY DU LIEU CO BAN
    ========================================================================== */
 
-OwnerEquity = FA( "EQUITY",     "C" );   // Von chu so huu
-TotalAsset = FA( "ASSET",      "O" );   // Tong tai san
-CashEq     = FA( "CASH",       "H" );   // Tien va tuong duong tien (+ dau tu ngan han)
-LTInvest   = FA( "LTINV",      "L" );   // Dau tu tai chinh dai han
-SharesOut  = FA( "SHARES",     "V" );   // So co phieu dang luu hanh
-TotalDebt  = FA( "DEBT",       "I" );   // Tong no vay (ngan + dai han)
-EBITDA_raw = FA( "EBITDA",     "1" );   // EBITDA (quy hoac TTM - xem toggle)
-Intangible = FA( "INTANGIBLE", "2" );   // Tai san vo hinh + loi the thuong mai
+/* Khoi tao truoc = Null de bien luon ton tai du di nhanh nao (tranh Error 29
+   "variable used without having been initialized") */
+OwnerEquity = Null;  TotalAsset = Null;  CashEq     = Null;  LTInvest   = Null;
+SharesOut   = Null;  TotalDebt  = Null;  EBITDA_raw = Null;  Intangible = Null;
+
+if( FA_MODE == 1 )
+{
+    /* Che do GOP: mot lan SetForeign lay duoc ca 8 truong (thay vi 8 lan
+       goi Foreign) - day la cach AmiBroker khuyen dung de tranh Warning 512. */
+    SetForeign( FA_PREFIX + Name(), False, True );
+
+    OwnerEquity = Close;      // Von chu so huu
+    TotalAsset  = Open;       // Tong tai san
+    CashEq      = High;       // Tien va tuong duong tien (+ dau tu ngan han)
+    LTInvest    = Low;        // Dau tu tai chinh dai han
+    SharesOut   = Volume;     // So co phieu dang luu hanh
+    TotalDebt   = OpenInt;    // Tong no vay (ngan + dai han)
+    EBITDA_raw  = Aux1;       // EBITDA (quy hoac TTM - xem toggle)
+    Intangible  = Aux2;       // Tai san vo hinh + loi the thuong mai
+
+    RestorePriceArrays();     // tra lai gia / Aux cua chinh ma dang quet
+}
+else
+{
+    /* Che do MOI CHI TIEU MOT COMPOSITE: buoc phai goi Foreign nhieu lan.
+       AmiBroker se hien Warning 512 - day chi la canh bao hieu nang, khong
+       phai loi; muon het canh bao thi dung FA_MODE = 1. */
+    OwnerEquity = FAField( "EQUITY" );
+    TotalAsset  = FAField( "ASSET" );
+    CashEq      = FAField( "CASH" );
+    LTInvest    = FAField( "LTINV" );
+    SharesOut   = FAField( "SHARES" );
+    TotalDebt   = FAField( "DEBT" );
+    EBITDA_raw  = FAField( "EBITDA" );
+    Intangible  = FAField( "INTANGIBLE" );
+}
 
 /* Neu nguon FA khong co SharesOut, thu lay tu Fundamental cua AmiBroker */
 SharesOut  = IIf( IsNull(SharesOut) OR SharesOut <= 0,
                   GetFnData("SharesOut"), SharesOut );
 
-/* Minority interest - khong bat buoc, chi co o che do composite rieng */
-Minority   = IIf( FA_MODE == 0, Nz( FAField("MINORITY") ), 0 );
+/* Minority interest - khong bat buoc, chi co o che do composite rieng.
+   Dung if/else de KHONG goi them Foreign() khi chay che do gop. */
+Minority = 0;
+if( FA_MODE == 0 )
+{
+    Minority = Nz( FAField("MINORITY") );
+}
 
+/* ---- EBITDA: quy doi ve TTM (cong 4 quy gan nhat) ----
+   Mang du lieu quy co dang bac thang (pad giua 2 ky cong bo), nen moi lan
+   gia tri doi = mot ky BCTC moi. ValueWhen(chg, q, n) lay gia tri tai lan
+   doi thu n gan nhat -> cong 4 lan doi gan nhat la duoc TTM.
+   Viet truc tiep o day (khong tach ham) de EBITDA luon duoc khoi tao. */
 UseTTM     = ParamToggle("EBITDA nguon la so TUNG QUY (tu cong TTM)", "Khong|Co", 1);
-EBITDA     = IIf( UseTTM, TTM4( EBITDA_raw ), EBITDA_raw );
+
+EBITDA_chg = ( EBITDA_raw != Ref( EBITDA_raw, -1 ) ) OR ( BarIndex() == 0 );
+EBITDA_TTM = ValueWhen( EBITDA_chg, EBITDA_raw, 1 ) +
+             ValueWhen( EBITDA_chg, EBITDA_raw, 2 ) +
+             ValueWhen( EBITDA_chg, EBITDA_raw, 3 ) +
+             ValueWhen( EBITDA_chg, EBITDA_raw, 4 );
+
+EBITDA     = IIf( UseTTM, EBITDA_TTM, EBITDA_raw );
 
 
 /* ==========================================================================

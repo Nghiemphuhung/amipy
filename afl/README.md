@@ -76,7 +76,8 @@ Giá và vốn hóa phải cùng đơn vị: nếu giá trong AmiBroker là VND 
 
 Nếu nguồn của bạn cấp **EBITDA từng quý**, để `EBITDA nguồn là số TỪNG QUÝ = Có`
 (mặc định) — code tự cộng 4 quý gần nhất thành TTM bằng `ValueWhen` trên các điểm
-đổi giá trị. Nếu nguồn đã là TTM thì tắt toggle này.
+đổi giá trị. Nếu nguồn đã là TTM thì tắt toggle này (nếu để bật với dữ liệu TTM,
+`EV/EBITDA` sẽ ra rỗng vì không đủ 4 điểm đổi kỳ).
 
 **Định dạng file CSV để import (ASCII Importer):**
 
@@ -112,6 +113,11 @@ Ticker,Date,Close
 | Aux2 | Intangible |
 
 Chế độ này gọn hơn (1 mã/1 cổ phiếu) nhưng không có ô cho `MINORITY` (code lấy = 0).
+
+Chế độ 1 cũng **nhanh hơn hẳn**: code dùng một lần `SetForeign()` để lấy cả 8 trường,
+thay vì 8 lần gọi `Foreign()` như chế độ 0. Nếu AmiBroker báo `Warning 512 — Calling
+Foreign() too many times`, đó là do chế độ 0 và chỉ là **cảnh báo hiệu năng, không phải
+lỗi** — muốn hết cảnh báo thì chuyển sang chế độ 1.
 
 ```
 $FORMAT Ticker, Date_YMD, Open, High, Low, Close, Volume, OpenInt, Aux1, Aux2
@@ -161,7 +167,9 @@ nữa nhưng cột vẫn hiển thị và vẫn tính vào `Điểm /11`.
 
 ## 4. Lưu ý kỹ thuật
 
-- Các phép chia đều qua `SafeDiv()`: mẫu = 0 hoặc Null trả về Null, ô hiển thị trống
+- Các phép chia đều qua `SafeDiv()`, hàm này thay mẫu bằng 1 trước khi chia (vì `IIf`
+  tính **cả hai** nhánh — để nguyên `num/den` sẽ sinh `Warning 505 Division by zero`);
+  mẫu = 0 hoặc Null trả về Null, ô hiển thị trống
   thay vì ra số vô nghĩa — và điều kiện lọc `NOT IsNull(...)` sẽ không cho mã thiếu
   dữ liệu lọt qua.
 - `P/TangibleBV` và `EV/EBITDA` chỉ tính đạt khi **dương** — vốn chủ hữu hình âm hoặc
