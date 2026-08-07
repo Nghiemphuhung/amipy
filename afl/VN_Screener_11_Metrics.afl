@@ -1,0 +1,317 @@
+/* ============================================================================
+   VN STOCK SCREENER - 11 TIEU CHI  (AmiBroker Exploration / Filter)
+   ----------------------------------------------------------------------------
+   Chay bang: Analysis -> Formula = file nay -> Apply to: All symbols
+              -> Range: 1 recent day (n last quotation) -> EXPLORE
+   ----------------------------------------------------------------------------
+   11 tieu chi:
+     1.  P / Tangible Book Value Per Share      (Gia / Gia tri so sach huu hinh)
+     2.  (Cash + Long-term Investment) / Total Asset
+     3.  EV / EBITDA
+     4.  Foreign Ownership %                    (So huu nuoc ngoai)
+     5.  SMA(100) < Close
+     6.  SMA(20)  > SMA(100)
+     7.  SMA(5)   > SMA(20)
+     8.  SMA(20)  > SMA(100)   <-- trung voi #6 trong yeu cau goc.
+                                   Mac dinh giu nguyen; co the doi ky han
+                                   qua Param "TC8: SMA nhanh/cham" neu muon.
+     9.  Khoi ngoai mua rong 1 tuan   (mac dinh 5 phien)
+     10. Khoi ngoai mua rong 1 thang  (mac dinh 21 phien)
+     11. Khoi ngoai mua rong 1 quy    (mac dinh 63 phien)
+   ----------------------------------------------------------------------------
+   LUU Y VE DU LIEU:
+   AmiBroker khong tu co du lieu co ban (BCTC) va giao dich khoi ngoai cua TTCK
+   Viet Nam. Ban phai nap san, roi tro dung nguon o phan CONFIG ben duoi.
+   File nay ho tro 2 kieu nap pho bien - xem afl/README.md de biet chi tiet.
+   ========================================================================== */
+
+_SECTION_BEGIN("VN Screener 11 - Config");
+
+/* ---------------------------------------------------------------------------
+   [A] NGUON DU LIEU CO BAN (Fundamental)
+   0 = Composite theo tung chi tieu:  ~FA_<FIELD>_<TICKER>  (gia tri o cot Close)
+       vd: ~FA_EQUITY_VNM, ~FA_ASSET_VNM, ~FA_EBITDA_VNM ...
+   1 = Composite gop 1 ma nhieu truong:  ~FA_<TICKER>
+       Close=Equity, Open=Asset, High=Cash, Low=LTInv, Volume=SharesOut,
+       OpenInt=Debt, Aux1=EBITDA, Aux2=Intangible   (xem README)
+   --------------------------------------------------------------------------- */
+FA_MODE      = Param("[A] Nguon FA (0=1 field/1 composite, 1=gop)", 0, 0, 1, 1);
+FA_PREFIX    = ParamStr("[A] Tien to composite FA", "~FA_");
+
+/* ---------------------------------------------------------------------------
+   [B] NGUON DU LIEU KHOI NGOAI (Foreign trading)
+   0 = Aux1 / Aux2 nap ngay tren ma co phieu: Aux1 = KL mua NN, Aux2 = KL ban NN
+       -> Gia tri rong = (Aux1 - Aux2) * Close
+   1 = Aux1 / Aux2 la GIA TRI mua / ban cua NN (khong nhan gia)
+   2 = Composite gia tri mua rong:  ~FN_<TICKER>  (Close = gia tri mua rong/phien)
+   --------------------------------------------------------------------------- */
+FN_MODE      = Param("[B] Nguon khoi ngoai (0=KL Aux,1=GT Aux,2=composite)", 0, 0, 2, 1);
+FN_PREFIX    = ParamStr("[B] Tien to composite khoi ngoai", "~FN_");
+FO_PREFIX    = ParamStr("[B] Tien to composite so huu NN", "~FO_"); // ~FO_<TICKER> = % so huu NN
+
+/* ---------------------------------------------------------------------------
+   [C] NGUONG LOC - bat / tat tung tieu chi
+   --------------------------------------------------------------------------- */
+Use1  = ParamToggle("TC1  Bat P/TangibleBV",        "Tat|Bat", 1);
+Max1  = Param      ("TC1  P/TangibleBV <=",         2.0,  0.1, 20,   0.1);
+
+Use2  = ParamToggle("TC2  Bat (Cash+LTInv)/Asset",  "Tat|Bat", 1);
+Min2  = Param      ("TC2  (Cash+LTInv)/Asset >= %", 20,   0,   100,  1);
+
+Use3  = ParamToggle("TC3  Bat EV/EBITDA",           "Tat|Bat", 1);
+Max3  = Param      ("TC3  EV/EBITDA <=",            10,   0.5, 50,   0.5);
+
+Use4  = ParamToggle("TC4  Bat So huu NN",           "Tat|Bat", 1);
+Min4  = Param      ("TC4  So huu NN >= %",          5,    0,   100,  0.5);
+
+Use5  = ParamToggle("TC5  Bat SMA100 < Gia",        "Tat|Bat", 1);
+Use6  = ParamToggle("TC6  Bat SMA20 > SMA100",      "Tat|Bat", 1);
+Use7  = ParamToggle("TC7  Bat SMA5  > SMA20",       "Tat|Bat", 1);
+Use8  = ParamToggle("TC8  Bat SMA20 > SMA100 (#2)", "Tat|Bat", 1);
+
+P_Fast = Param("TC7/8: SMA nhanh",  5,   2, 50,  1);
+P_Mid  = Param("TC6/7/8: SMA giua", 20,  3, 100, 1);
+P_Slow = Param("TC5/6/8: SMA cham", 100, 10, 300, 1);
+P8_A   = Param("TC8: SMA nhanh cua rieng #8", 20,  2, 200, 1);
+P8_B   = Param("TC8: SMA cham cua rieng #8",  100, 3, 400, 1);
+
+Use9  = ParamToggle("TC9  Bat mua rong 1 tuan",  "Tat|Bat", 1);
+Use10 = ParamToggle("TC10 Bat mua rong 1 thang", "Tat|Bat", 1);
+Use11 = ParamToggle("TC11 Bat mua rong 1 quy",   "Tat|Bat", 1);
+N_W   = Param("TC9  So phien 1 tuan",  5,  1, 20,  1);
+N_M   = Param("TC10 So phien 1 thang", 21, 5, 60,  1);
+N_Q   = Param("TC11 So phien 1 quy",   63, 20, 130, 1);
+NetUnit = Param("Don vi hien thi gia tri rong (chia cho)", 1e9, 1, 1e12, 1); // 1e9 = ty dong
+
+/* ---------------------------------------------------------------------------
+   [D] BO LOC THANH KHOAN / KY THUAT phu tro
+   --------------------------------------------------------------------------- */
+MinPrice = Param("Loc: gia toi thieu",              1000, 0, 200000, 100);
+MinLiq   = Param("Loc: GTGD TB20 toi thieu (trieu)", 1000, 0, 100000, 100);
+ShowAll  = ParamToggle("Hien thi TAT CA ma (chi to mau)", "Khong|Co", 0);
+
+_SECTION_END();
+
+
+/* ==========================================================================
+   1. HAM TIEN ICH
+   ========================================================================== */
+
+/* Chia an toan: mau <= 0 hoac Null -> tra Null (de cot hien thi trong) */
+function SafeDiv( num, den )
+{
+    return IIf( IsNull(den) OR den == 0 OR IsNull(num), Null, num / den );
+}
+
+/* Doc 1 truong co ban tu composite rieng: ~FA_<FIELD>_<TICKER> */
+function FAField( fieldname )
+{
+    local sym;
+    sym = FA_PREFIX + fieldname + "_" + Name();
+    return Foreign( sym, "C", True );   // True = pad gia tri phien truoc
+}
+
+/* Doc truong tu composite gop: ~FA_<TICKER>, moi truong nam o 1 cot OHLCV */
+function FAPacked( fld )
+{
+    local sym;
+    sym = FA_PREFIX + Name();
+    return Foreign( sym, fld, True );
+}
+
+/* Bo chon nguon theo FA_MODE. packedfld = ky tu cot khi dung che do gop. */
+function FA( fieldname, packedfld )
+{
+    if( FA_MODE == 0 )
+        return FAField( fieldname );
+
+    return FAPacked( packedfld );
+}
+
+/* Cong don 4 quy gan nhat (TTM) tu mang du lieu quy dang bac thang.
+   Dung khi nguon chi cung cap so lieu TUNG QUY chu khong phai TTM san. */
+function TTM4( q )
+{
+    local chg, s;
+    chg    = q != Ref( q, -1 );
+    chg[0] = True;
+    s = ValueWhen( chg, q, 1 ) + ValueWhen( chg, q, 2 ) +
+        ValueWhen( chg, q, 3 ) + ValueWhen( chg, q, 4 );
+    return s;
+}
+
+/* Gia tri mua rong cua khoi ngoai theo tung phien (dong). */
+function ForeignNetValue()
+{
+    local b, s, v;
+
+    if( FN_MODE == 2 )
+        return Foreign( FN_PREFIX + Name(), "C", True );
+
+    b = Aux1;
+    s = Aux2;
+    v = b - s;
+
+    if( FN_MODE == 0 )
+        v = v * Close;    // Aux la KHOI LUONG -> quy ra gia tri
+
+    return v;
+}
+
+
+/* ==========================================================================
+   2. LAY DU LIEU CO BAN
+   ========================================================================== */
+
+OwnerEquity = FA( "EQUITY",     "C" );   // Von chu so huu
+TotalAsset = FA( "ASSET",      "O" );   // Tong tai san
+CashEq     = FA( "CASH",       "H" );   // Tien va tuong duong tien (+ dau tu ngan han)
+LTInvest   = FA( "LTINV",      "L" );   // Dau tu tai chinh dai han
+SharesOut  = FA( "SHARES",     "V" );   // So co phieu dang luu hanh
+TotalDebt  = FA( "DEBT",       "I" );   // Tong no vay (ngan + dai han)
+EBITDA_raw = FA( "EBITDA",     "1" );   // EBITDA (quy hoac TTM - xem toggle)
+Intangible = FA( "INTANGIBLE", "2" );   // Tai san vo hinh + loi the thuong mai
+
+/* Neu nguon FA khong co SharesOut, thu lay tu Fundamental cua AmiBroker */
+SharesOut  = IIf( IsNull(SharesOut) OR SharesOut <= 0,
+                  GetFnData("SharesOut"), SharesOut );
+
+/* Minority interest - khong bat buoc, chi co o che do composite rieng */
+Minority   = IIf( FA_MODE == 0, Nz( FAField("MINORITY") ), 0 );
+
+UseTTM     = ParamToggle("EBITDA nguon la so TUNG QUY (tu cong TTM)", "Khong|Co", 1);
+EBITDA     = IIf( UseTTM, TTM4( EBITDA_raw ), EBITDA_raw );
+
+
+/* ==========================================================================
+   3. TINH 11 CHI TIEU
+   ========================================================================== */
+
+/* ---- TC1: P / Tangible Book Value Per Share ---- */
+TangibleBV   = OwnerEquity - Nz( Intangible );
+TangibleBVPS = SafeDiv( TangibleBV, SharesOut );
+P_TBV        = SafeDiv( Close, TangibleBVPS );
+
+/* ---- TC2: (Cash + Long-term Investment) / Total Asset ---- */
+CashInvRatio = 100 * SafeDiv( Nz(CashEq) + Nz(LTInvest), TotalAsset );
+
+/* ---- TC3: EV / EBITDA ---- */
+MarketCap    = Close * SharesOut;
+EV           = MarketCap + Nz(TotalDebt) + Nz(Minority) - Nz(CashEq);
+EV_EBITDA    = SafeDiv( EV, EBITDA );
+
+/* ---- TC4: So huu nuoc ngoai (%) ---- */
+ForeignOwn   = Foreign( FO_PREFIX + Name(), "C", True );
+if( FA_MODE == 0 )
+    ForeignOwn = IIf( IsNull(ForeignOwn), FAField("FOWN"), ForeignOwn );
+/* Neu nguon tra ty le dang 0..1 thi quy ve phan tram */
+ForeignOwn   = IIf( ForeignOwn > 0 AND ForeignOwn <= 1, ForeignOwn * 100, ForeignOwn );
+
+/* ---- TC5..TC8: Duong trung binh dong ---- */
+MA_Fast  = MA( Close, P_Fast );
+MA_Mid   = MA( Close, P_Mid );
+MA_Slow  = MA( Close, P_Slow );
+MA8_A    = MA( Close, P8_A );
+MA8_B    = MA( Close, P8_B );
+
+/* ---- TC9..TC11: Khoi ngoai mua rong ---- */
+FNet     = ForeignNetValue();
+Net_W    = Sum( Nz(FNet), N_W );
+Net_M    = Sum( Nz(FNet), N_M );
+Net_Q    = Sum( Nz(FNet), N_Q );
+
+HasFNet  = NOT IsNull( FNet ) AND Sum( IIf( Nz(FNet) != 0, 1, 0 ), N_Q ) > 0;
+
+
+/* ==========================================================================
+   4. DIEU KIEN LOC
+   ========================================================================== */
+
+C1  = NOT IsNull(P_TBV)        AND P_TBV > 0       AND P_TBV        <= Max1;
+C2  = NOT IsNull(CashInvRatio) AND CashInvRatio    >= Min2;
+C3  = NOT IsNull(EV_EBITDA)    AND EV_EBITDA > 0   AND EV_EBITDA    <= Max3;
+C4  = NOT IsNull(ForeignOwn)   AND ForeignOwn      >= Min4;
+C5  = MA_Slow < Close;
+C6  = MA_Mid  > MA_Slow;
+C7  = MA_Fast > MA_Mid;
+C8  = MA8_A   > MA8_B;
+C9  = HasFNet AND Net_W > 0;
+C10 = HasFNet AND Net_M > 0;
+C11 = HasFNet AND Net_Q > 0;
+
+/* Chi ap dung tieu chi nao dang duoc BAT */
+A1  = NOT Use1  OR C1;   A2  = NOT Use2  OR C2;   A3  = NOT Use3  OR C3;
+A4  = NOT Use4  OR C4;   A5  = NOT Use5  OR C5;   A6  = NOT Use6  OR C6;
+A7  = NOT Use7  OR C7;   A8  = NOT Use8  OR C8;   A9  = NOT Use9  OR C9;
+A10 = NOT Use10 OR C10;  A11 = NOT Use11 OR C11;
+
+Liquidity  = MA( Close * Volume, 20 );
+BaseOK     = Close >= MinPrice AND Liquidity >= MinLiq * 1e6 AND Volume > 0;
+
+PassAll    = A1 AND A2 AND A3 AND A4 AND A5 AND A6 AND
+             A7 AND A8 AND A9 AND A10 AND A11 AND BaseOK;
+
+/* Dem so tieu chi dat (tren 11) de xep hang */
+Score = C1 + C2 + C3 + C4 + C5 + C6 + C7 + C8 + C9 + C10 + C11;
+
+Filter = IIf( ShowAll, BaseOK, PassAll ) AND Status("lastbarinrange");
+
+
+/* ==========================================================================
+   5. HIEN THI KET QUA
+   ========================================================================== */
+
+SetOption("NoDefaultColumns", True);
+
+cPass = colorPaleGreen;
+cFail = colorRose;
+function Flag( cond ) { return IIf( cond, cPass, cFail ); }
+
+AddTextColumn( Name(),              "Ma",        1.0, colorDefault, colorDefault, 60 );
+AddColumn( DateTime(),              "Ngay",      formatDateTime, colorDefault, colorDefault, 90 );
+AddColumn( Close,                   "Gia",       1.0, colorDefault, colorDefault, 70 );
+AddColumn( Score,                   "Diem /11",  1.0, colorBlack,
+           IIf( Score >= 9, colorPaleGreen, IIf( Score >= 6, colorLightYellow, colorRose ) ), 70 );
+
+AddColumn( P_TBV,        "1. P/TangBV",     1.2, colorBlack, Flag(C1),  85 );
+AddColumn( CashInvRatio, "2. (Cash+Inv)/TS %", 1.1, colorBlack, Flag(C2), 105 );
+AddColumn( EV_EBITDA,    "3. EV/EBITDA",    1.2, colorBlack, Flag(C3),  95 );
+AddColumn( ForeignOwn,   "4. So huu NN %",  1.2, colorBlack, Flag(C4),  95 );
+
+AddColumn( MA_Slow,      "5. SMA" + WriteVal(P_Slow,1.0) + " < Gia", 1.0, colorBlack, Flag(C5), 105 );
+AddColumn( MA_Mid,       "6. SMA" + WriteVal(P_Mid,1.0)  + ">SMA" + WriteVal(P_Slow,1.0), 1.0, colorBlack, Flag(C6), 105 );
+AddColumn( MA_Fast,      "7. SMA" + WriteVal(P_Fast,1.0) + ">SMA" + WriteVal(P_Mid,1.0),  1.0, colorBlack, Flag(C7), 105 );
+AddColumn( MA8_A,        "8. SMA" + WriteVal(P8_A,1.0)   + ">SMA" + WriteVal(P8_B,1.0),   1.0, colorBlack, Flag(C8), 105 );
+
+AddColumn( Net_W / NetUnit, "9. NN rong 1T",  1.2, colorBlack, Flag(C9),  95 );
+AddColumn( Net_M / NetUnit, "10. NN rong 1Th",1.2, colorBlack, Flag(C10), 100 );
+AddColumn( Net_Q / NetUnit, "11. NN rong 1Q", 1.2, colorBlack, Flag(C11), 100 );
+
+AddColumn( Liquidity / 1e6, "GTGD TB20 (tr)", 1.0, colorDefault, colorDefault, 100 );
+
+/* Canh bao thieu du lieu de biet ma nao bi loai vi thieu so lieu chu khong phai vi xau */
+MissFA = IIf( IsNull(OwnerEquity) OR IsNull(TotalAsset) OR SharesOut <= 0 OR IsNull(SharesOut), 1, 0 );
+MissFN = IIf( HasFNet, 0, 1 );
+AddTextColumn( WriteIf( MissFA AND MissFN, "Thieu FA + NN",
+               WriteIf( MissFA, "Thieu FA",
+               WriteIf( MissFN, "Thieu NN", "OK" ) ) ),
+               "Du lieu", 1.0, colorBlack,
+               IIf( MissFA OR MissFN, colorLightOrange, colorDefault ), 100 );
+
+SetSortColumns( -4 );   // sap xep giam dan theo cot Diem /11
+
+
+/* ==========================================================================
+   6. VE TREN DO THI (khi dung file nay lam Indicator)
+   ========================================================================== */
+
+Plot( Close,   "Gia",   colorDefault, styleCandle );
+Plot( MA_Fast, "SMA" + WriteVal(P_Fast,1.0), colorBlue,  styleLine );
+Plot( MA_Mid,  "SMA" + WriteVal(P_Mid,1.0),  colorOrange,styleLine );
+Plot( MA_Slow, "SMA" + WriteVal(P_Slow,1.0), colorRed,   styleLine );
+PlotShapes( IIf( PassAll AND NOT Ref(PassAll,-1), shapeUpArrow, shapeNone ),
+            colorBrightGreen, 0, Low, -20 );
+Title = Name() + "  Diem: " + WriteVal(Score,1.0) + "/11" +
+        "  |  P/TangBV=" + WriteVal(P_TBV,1.2) +
+        "  EV/EBITDA="   + WriteVal(EV_EBITDA,1.2) +
+        "  SHNN="        + WriteVal(ForeignOwn,1.2) + "%";
