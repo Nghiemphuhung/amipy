@@ -156,7 +156,10 @@ if( FA_MODE == 1 )
 {
     /* Che do GOP: mot lan SetForeign lay duoc ca 8 truong (thay vi 8 lan
        goi Foreign) - day la cach AmiBroker khuyen dung de tranh Warning 512. */
-    SetForeign( FA_PREFIX + Name(), False, True );
+    /* SetForeign( ticker, fixup, tradeprices ):
+       fixup = True  -> pad gia tri ky truoc sang cac phien chua co so lieu
+       tradeprices = False -> khong dung ky mang gia giao dich */
+    SetForeign( FA_PREFIX + Name(), True, False );
 
     OwnerEquity = Close;      // Von chu so huu
     TotalAsset  = Open;       // Tong tai san
