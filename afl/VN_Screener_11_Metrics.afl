@@ -122,10 +122,18 @@ function FAPacked( fld )
 /* Bo chon nguon theo FA_MODE. packedfld = ky tu cot khi dung che do gop. */
 function FA( fieldname, packedfld )
 {
-    if( FA_MODE == 0 )
-        return FAField( fieldname );
+    local res;
 
-    return FAPacked( packedfld );
+    if( FA_MODE == 0 )
+    {
+        res = FAField( fieldname );
+    }
+    else
+    {
+        res = FAPacked( packedfld );
+    }
+
+    return res;
 }
 
 /* Cong don 4 quy gan nhat (TTM) tu mang du lieu quy dang bac thang.
@@ -146,14 +154,20 @@ function ForeignNetValue()
     local b, s, v;
 
     if( FN_MODE == 2 )
-        return Foreign( FN_PREFIX + Name(), "C", True );
+    {
+        v = Foreign( FN_PREFIX + Name(), "C", True );
+    }
+    else
+    {
+        b = Aux1;
+        s = Aux2;
+        v = b - s;
 
-    b = Aux1;
-    s = Aux2;
-    v = b - s;
-
-    if( FN_MODE == 0 )
-        v = v * Close;    // Aux la KHOI LUONG -> quy ra gia tri
+        if( FN_MODE == 0 )
+        {
+            v = v * Close;    // Aux la KHOI LUONG -> quy ra gia tri
+        }
+    }
 
     return v;
 }
@@ -203,7 +217,9 @@ EV_EBITDA    = SafeDiv( EV, EBITDA );
 /* ---- TC4: So huu nuoc ngoai (%) ---- */
 ForeignOwn   = Foreign( FO_PREFIX + Name(), "C", True );
 if( FA_MODE == 0 )
+{
     ForeignOwn = IIf( IsNull(ForeignOwn), FAField("FOWN"), ForeignOwn );
+}
 /* Neu nguon tra ty le dang 0..1 thi quy ve phan tram */
 ForeignOwn   = IIf( ForeignOwn > 0 AND ForeignOwn <= 1, ForeignOwn * 100, ForeignOwn );
 
